@@ -1,0 +1,27 @@
+
+button {
+    color: black
+}
+
+button when hover {
+    margin: 2px
+    color: green
+    outline: 3px green
+}
+
+
+vertical_list {
+    button primary "login" if "notLoggedIn" {
+        "Login"
+    }
+    button primary "ok" if "loggedIn" {
+        "Logout" 
+    }
+    
+    
+}
+
+
+prototype button(action) {
+    
+}
