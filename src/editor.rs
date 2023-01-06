@@ -2,7 +2,10 @@ use std::ops::Range;
 
 use sdl2::keyboard::Keycode;
 
-use crate::{font::FontRenderer, ui::{self, UIShader}};
+use crate::{
+    font::FontRenderer,
+    ui::{self, UIShader},
+};
 
 pub struct Editor {
     lines: Vec<String>,
@@ -56,6 +59,9 @@ impl Editor {
                 self.cursor_horizontal(1);
                 self.cursor_clamp_horizontal();
             }
+            Keycode::Return => {
+                self.new_line();
+            }
             Keycode::Delete => {
                 self.cursor_clamp_horizontal();
                 self.delete(
@@ -63,17 +69,40 @@ impl Editor {
                     self.cursor.char as i32..(self.cursor.char + 1) as i32,
                 );
             }
+            Keycode::Tab => {
+                self.handle_text(String::from("    "));
+            }
             Keycode::Backspace => {
-                self.cursor_clamp_horizontal();
-                self.delete(
-                    self.cursor.line,
-                    (self.cursor.char as i32 - 1)..self.cursor.char as i32,
-                );
-                self.cursor_horizontal(-1);
+                if self.cursor.char == 0 {
+                    let text = self.get_text(self.cursor.line, 0..1000);
+                    if let Some(line) = self.lines.get_mut((self.cursor.line as i32 - 1).max(0) as usize) {
+                        self.cursor.char = line.len() as u32;
+                        *line = line.to_owned() + text.as_str();
+                        self.lines.remove(self.cursor.line as usize);
+                        self.cursor_vertical(-1);
+                    }
+                } else {
+                    self.cursor_clamp_horizontal();
+                    self.delete(
+                        self.cursor.line,
+                        (self.cursor.char as i32 - 1)..self.cursor.char as i32,
+                    );
+                    self.cursor_horizontal(-1);
+                }
             }
             _ => {}
         }
         self.cursor_clamp_vertical();
+    }
+    fn new_line(&mut self) {
+        if let Some(line) = self.lines.get(self.cursor.line as usize) {
+            let range = self.cursor.char as i32..1000;
+            let right = self.get_text(self.cursor.line, range.clone());
+            self.delete(self.cursor.line, range);
+            self.lines.insert((self.cursor.line + 1) as usize, right);
+            self.cursor.line += 1;
+            self.cursor.char = 0;
+        }
     }
 
     fn cursor_horizontal(&mut self, amount: i32) {
@@ -88,20 +117,36 @@ impl Editor {
         }
     }
     fn cursor_clamp_vertical(&mut self) {
-        self.cursor.line = self.cursor.line.clamp(0, self.lines.len() as u32 - 1);
+        self.cursor.line = self.cursor.line.clamp(0, (self.lines.len() as i32 - 1).max(0) as u32);
     }
     pub fn delete(&mut self, line: u32, range: Range<i32>) {
         if let Some(line) = self.lines.get_mut(line as usize) {
             let start = range.start.clamp(0, line.len() as i32) as usize;
             let end = range.end.clamp(0, line.len() as i32) as usize;
-
-            let left = line[..start].to_owned();
-            let right = line[end..].to_owned();
-            *line = format!("{}{}", left, right);
+            if end > start {
+                let left = line[..start].to_owned();
+                let right = line[end..].to_owned();
+                *line = format!("{}{}", left, right);
+            }
         }
+    }
+    pub fn get_text(&self, line: u32, range: Range<i32>) -> String {
+        if let Some(line) = self.lines.get(line as usize) {
+            let start = range.start.clamp(0, line.len() as i32) as usize;
+            let end = range.end.clamp(0, line.len() as i32) as usize;
+            return if end <= start {
+                String::new()
+            } else {
+                let left = line[start..end].to_owned();
+                left
+            };
+        }
+        String::new()
     }
 
     pub fn handle_text(&mut self, text: String) {
+        self.cursor_clamp_horizontal();
+        self.cursor_clamp_vertical();
         let len = text.len();
         let char_at = self.cursor.char as usize;
         let line = self
@@ -131,7 +176,14 @@ impl Editor {
                 ui::GRAY,
             );
             if index == self.cursor.line as usize {
-                gui.draw_rect(30.0, index as f32 * 20.0 + 30.0, 1000.0, 20.0, 0.0, ui::Color::rgba(255, 255, 255, 10));
+                gui.draw_rect(
+                    30.0,
+                    index as f32 * 20.0 + 30.0,
+                    1000.0,
+                    20.0,
+                    0.0,
+                    ui::Color::rgba(255, 255, 255, 10),
+                );
             }
             text_renderer.draw(line, 30.0, index as f32 * 20.0 + 50.0, ui::WHITE);
         }
@@ -142,7 +194,14 @@ impl Editor {
                 line_ref[..self.cursor.char as usize].to_owned()
             };
             let width = text_renderer.text_width(&var_name);
-            gui.draw_rect(29.0 + width, self.cursor.line as f32 * 20.0 + 30.0, 2.0, 20.0, 0.0, ui::GRAY);
+            gui.draw_rect(
+                29.0 + width,
+                self.cursor.line as f32 * 20.0 + 30.0,
+                2.0,
+                20.0,
+                0.0,
+                ui::GRAY,
+            );
         }
     }
     pub fn paste_lines(&mut self, mut lines: Vec<String>) {
@@ -189,4 +248,16 @@ fn test_editor() {
     editor.delete(0, 20..(test_str.len() + 10) as i32);
     let first_line = editor.lines.get(0).expect("first line");
     assert_eq!(first_line, &String::from("Hello World"));
+
+    editor.lines = vec![String::from(test_str)];
+    let text = editor.get_text(0, 0..100);
+    assert_eq!(text, test_str.to_owned());
+
+    editor.lines = vec![String::from(test_str)];
+    let text = editor.get_text(0, 0..5);
+    assert_eq!(text, "Hello".to_owned());
+
+    editor.lines = vec![String::from(test_str)];
+    let text = editor.get_text(0, 5..0);
+    assert_eq!(text, String::new());
 }
